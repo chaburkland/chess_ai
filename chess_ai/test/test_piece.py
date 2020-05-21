@@ -1,5 +1,6 @@
 from pytest import main
 
+from chess_ai.core.Mechanics.point import Point
 from chess_ai.core.Utils.reference import Ref
 from chess_ai.core.Game.board import Board
 from chess_ai.core.Pieces.piece import Piece, Empty, King, Queen, Rook, Knight, Bishop, Pawn
@@ -15,7 +16,7 @@ class BoardTester(Board):
 
 class PieceTester(Piece):
     def __init__(self, color, board, pos):
-        super.__init__(color, board, pos)
+        super().__init__(color, board, pos)
         self.can_attack_result = False
 
     def can_attack(self, p):
@@ -55,7 +56,7 @@ def test_is_valid_move():
     assert p.is_valid_move(Point()) != b.move_exposes_king(p, Point(), p.color)
 
 def test_can_move_horizontally_to_empty_space():
-    b = BoardTester()
+    b = Board()
     p = PieceTester(Color.White, b, Point(4, 4))
 
     assert p._can_move_horizontally_to(0)
@@ -113,7 +114,7 @@ def test_can_move_vertically_to_enemy_piece():
 
     assert p._can_move_vertically_to(6)
     b.perform_move(b[7, 7], Point(2, 4))
-    assert p._can_move_vertically_to(2))
+    assert p._can_move_vertically_to(2)
 
 def test_can_not_move_vertically_to_invalid_space():
     b = Board()
