@@ -2,7 +2,7 @@ import typing as tp
 from collections import namedtuple
 from itertools import product
 
-from chess_ai.core.Pieces.piece import Piece, Pawn, Empty
+from chess_ai.core.Pieces.piece import Piece, Pawn, PieceType
 from chess_ai.core.Mechanics.color import Color
 from chess_ai.core.Mechanics.point import Point
 
@@ -25,13 +25,16 @@ class Screenshot:
         for row, col in product(range(8), range(8)):
             piece: Piece = board[row, col]
 
-            if piece is not Empty:
-                for move in piece.get_all_valid_moves():
+            if piece is not None:
+
+                valid_moves = piece.get_all_valid_moves()
+
+                for move in valid_moves:
                     moves.append(TeamMovePair(MovePair(Point(row, col), move), piece.color))
 
                 total_pieces += 1
 
-                if isinstance(piece, Pawn):
+                if piece.piece_type == PieceType.Pawn:
                     pawn_locations.append(piece.pos)
 
         return cls(moves, board.white_score, board.black_score, pawn_locations, total_pieces)

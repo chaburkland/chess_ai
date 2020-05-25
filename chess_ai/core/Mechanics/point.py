@@ -7,6 +7,10 @@ class Point:
             a=0, b=1, c=2, d=3, e=4, f=5, g=6, h=7,
             A=0, B=1, C=2, D=3, E=4, F=5, G=6, H=7)
 
+    REVERSE_KEY_MAP = {
+            0: 'A', 1: 'B', 2: 'C', 3: 'D', 4: 'E', 5: 'F', 6: 'G', 7: 'H',
+    }
+
     @classmethod
     def from_str(cls, coordinates: str) -> 'Point':
         try:
@@ -26,6 +30,9 @@ class Point:
 
     def __eq__(self, other):
         return self._x == other.x and self._y == other.y
+
+    def __hash__(self):
+        return hash(hash(self.x) + hash(self.y))
 
     def equals(self, x, y):
         return self._x == x and self._y == y
@@ -47,6 +54,9 @@ class Point:
     def y(self, val):
         assert check_bounds(val)
         self._y = y
+
+    def to_str(self) -> str:
+        return f'{self.REVERSE_KEY_MAP[self.y]}{self.x + 1}'
 
     def __repr__(self):
         return f'Point<{self.x}, {self.y}>'

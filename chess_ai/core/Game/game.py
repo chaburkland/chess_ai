@@ -2,13 +2,17 @@ import typing as tp
 from enum import Enum
 from itertools import product
 from collections import namedtuple
+from tqdm import tqdm
 
 from chess_ai.core.Game.screenshot import Screenshot
 from chess_ai.core.Game.board import Board
 from chess_ai.core.Mechanics.point import Point
 from chess_ai.core.Mechanics.color import Color, get_opposite_color
 from chess_ai.core.Mechanics.status import Status
-from chess_ai.core.Pieces.piece import Empty, Piece, Queen, Knight, Rook, Pawn, Bishop
+from chess_ai.core.Mechanics.move import Move
+from chess_ai.core.Pieces.piece import Piece, Queen, Knight, Rook, Pawn, Bishop, PieceType
+from chess_ai.core.Utils.pgn_parser import Parser, Castle
+from chess_ai.core.Utils.reference import Ref
 
 
 class CompetitiveRulesetEndings(Enum):
@@ -57,43 +61,52 @@ class Game:
         self.fifty_moves_no_progress_forfeited: bool = False
         self.stagnant_move_count: int = 0
 
-    def start_game(self, initial_moves: tp.Optional[tp.List[tp.Tuple[str, str]]] = None):
-        game_status: Status = Status.InProgress
-        competitive_ending: tp.Optional[CompetitiveRulesetEndings] = None
+    def _reset_after_turn(self, status: Ref[Status]):
+        self.board.invalidate_cache()
 
-        def reset_after_turn():
-            nonlocal game_status
+        # Change team
+        self.current_team = get_opposite_color(self.current_team)
 
-            # Change team
-            self.current_team = get_opposite_color(self.current_team)
+        # Screenshot state
+        #self.game_history.append(GameHistory(self.board.screenshot, 1))
 
-            # Screenshot state
-            self.game_history.append(GameHistory(self.board.screenshot, 1))
+        # Update status
+        status.update(self.board.get_board_status(self.current_team))
 
-            # Update status
-            game_status = self.board.get_board_status(self.current_team)
+    def _game_not_finished(self, status: Ref[Status], ending: Ref[tp.Optional[CompetitiveRulesetEndings]]) -> bool:
+        status.update(self.board.get_board_status(self.current_team))
+        ending.update(self.check_competitive_ruleset())
+
+        if status in (Status.Checkmate, Status.Stalemate) or ending.value is not None:
+            return False
+        return True
+
+    def start_game(self, initial_moves: tp.Union[None, Parser, tp.List[tp.Tuple[str, str]]] = None):
+        game_status: Status = Ref(Status.InProgress)
+        competitive_ending: Ref[tp.Optional[CompetitiveRulesetEndings]] = Ref(None)
 
         if initial_moves is not None:
-            i = 0
-            for move1, move2 in initial_moves:
-                destination = Point.from_str(move2)
-                self.board.perform_move(self.board[move1], destination, default_promotion=True)
+            if isinstance(initial_moves, Parser):
+                for white_move, black_move in tqdm(initial_moves.yield_moves(), total=8849):
+                    piece, w_destination, w_promotion = self.board.parse_points_from_move(white_move)
+                    self.board.perform_move(piece, w_destination, promotion=w_promotion)
 
-                reset_after_turn()
+                    self._reset_after_turn(game_status)
 
+                    if black_move is None:
+                        break
+                    piece, b_destination, b_promotion = self.board.parse_points_from_move(black_move)
+                    self.board.perform_move(piece, b_destination, promotion=b_promotion)
+                    self._reset_after_turn(game_status)
 
-        def continue_playing():
-            nonlocal game_status
-            nonlocal competitive_ending
+            else:
+                for move1, move2 in tqdm(initial_moves):
+                    destination = Point.from_str(move2)
+                    self.board.perform_move(self.board[move1], destination, promotion=PieceType.Queen)
 
-            game_status = self.board.get_board_status(self.current_team)
-            competitive_ending = self.check_competitive_ruleset()
+                    self._reset_after_turn(game_status)
 
-            if game_status in (Status.Checkmate, Status.Stalemate) or competitive_ending is not None:
-                return False
-            return True
-
-        while continue_playing():
+        while self._game_not_finished(game_status, competitive_ending):
             print(self.board)
             #print(f'White Score: {self.get_score(Color.White)}')
             #print(f'Black Score: {self.get_score(Color.Black)}')
@@ -104,7 +117,8 @@ class Game:
                 piece_location, move_to = self.get_input('Please input your move: ')
             except UserQuitMidGameException as e:
                 print(e)
-                return
+                return game_status, competitive_ending
+
 
             piece = self.board[piece_location]
 
@@ -116,7 +130,7 @@ class Game:
 
             self.output_check_status_updates(white_check, black_check)
 
-            reset_after_turn()
+            self._reset_after_turn(game_status)
 
         self.display_game_ending(game_status, competitive_ending)
 
@@ -131,6 +145,9 @@ class Game:
 
             if user_input in ('Quit', 'quit', 'q', 'Q'):
                 raise UserQuitMidGameException
+
+            if user_input == 'interact':
+                breakpoint()
 
             for delim in self.INPUT_DELIMS:
                 if delim in user_input:
@@ -157,7 +174,7 @@ class Game:
         '''Validates whether or not a move is complete'''
         piece: Piece = self.board[piece_location]
 
-        if piece is Empty:
+        if piece is None:
             print('Not a piece! Try again.\n')
             return False
 
@@ -294,16 +311,19 @@ class Game:
         for row, col in product(range(8), range(8)):
             piece = self.board[row, col]
 
+            if piece is None:
+                continue
+
             # If there is a single queen, rook, or pawn in play there is sufficient material to force a check
-            if isinstance(piece, (Queen, Rook, Pawn)):
+            if piece.piece_type in (PieceType.Queen, PieceType.Rook, PieceType.Pawn):
                 return None
 
-            if isinstance(piece, Knight):
+            if piece.piece_type == PieceType.Knight:
                 if piece.color == Color.White:
                     white_knights += 1
                 else:
                     black_knights += 1
-            elif isinstance(piece, Bishop):
+            elif piece.piece_type == PieceType.Bishop:
                 if piece.color == Color.White:
                     white_bishop_a |= (row + col) % 2 == 0
                     white_bishop_b |= (row - col) % 2 != 0
@@ -317,22 +337,22 @@ class Game:
         no_knights = white_knights == 0 and black_knights == 0
 
         # King & bishop(A or B) vs King & bishop(A or B) - (Same A or B on both sides)
-        if ((whiteBishopA == 0 and whiteBishopB != 0 and blackBishopA == 0 and blackBishopB != 0) or
-                (whiteBishopA != 0 and whiteBishopB == 0 and blackBishopA != 0 and blackBishopB == 0) and noKnights):
+        if ((white_bishop_a == 0 and white_bishop_b != 0 and black_bishop_a == 0 and black_bishop_b != 0) or
+                (white_bishop_a != 0 and white_bishop_b == 0 and black_bishop_a != 0 and black_bishop_b == 0) and no_knights):
             return CompetitiveRulesetEndings.InsufficientMaterials
 
         # King vs King & bishop(A or B)
-        elif ((((not whiteBishopA) ^ (not whiteBishopB)) and noBlackBishops) or
-                 (((not blackBishopA) ^ (not blackBishopB)) and noWhiteBishops) and noKnights):
+        elif ((((not white_bishop_a) ^ (not white_bishop_b)) and no_black_bishops) or
+                 (((not black_bishop_a) ^ (not black_bishop_b)) and no_white_bishops) and no_knights):
             return CompetitiveRulesetEndings.InsufficientMaterials
 
         # King vs King and Knight
-        elif ((whiteKnights == 1 and blackKnights == 0) or
-                (blackKnights == 1 and whiteKnights == 0) and noBishops):
+        elif ((white_knights == 1 and black_knights == 0) or
+                (black_knights == 1 and white_knights == 0) and no_bishops):
             return CompetitiveRulesetEndings.InsufficientMaterials
 
         # King vs King
-        elif (noBishops and noKnights):
+        elif (no_bishops and no_knights):
             return CompetitiveRulesetEndings.InsufficientMaterials
 
         return None

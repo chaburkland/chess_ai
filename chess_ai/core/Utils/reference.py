@@ -18,7 +18,9 @@ class Ref(Generic[T]):
         return self.value
 
     def __eq__(self, other: Generic[T]):
-        return self.value == other.value
+        if isinstance(other, self.__class__):
+            return self.value == other.value
+        return self.value == other
 
     def __repr__(self) -> str:
         return f'Ref<{self._value.__class__.__name__}, {self._value}>'

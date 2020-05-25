@@ -3,7 +3,7 @@ from pytest import main
 from chess_ai.core.Mechanics.point import Point
 from chess_ai.core.Utils.reference import Ref
 from chess_ai.core.Game.board import Board
-from chess_ai.core.Pieces.piece import Piece, Empty, King, Queen, Rook, Knight, Bishop, Pawn
+from chess_ai.core.Pieces.piece import Piece, King, Queen, Rook, Knight, Bishop, Pawn
 from chess_ai.core.Mechanics.color import Color
 
 class BoardTester(Board):
@@ -19,7 +19,7 @@ class PieceTester(Piece):
         super().__init__(color, board, pos)
         self.can_attack_result = False
 
-    def can_attack(self, p):
+    def can_attack(self, p, *, ignore_color: bool = False):
         return self.can_attack_result
 
     def get_all_valid_moves(self):

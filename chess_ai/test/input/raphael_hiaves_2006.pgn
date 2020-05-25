@@ -1,0 +1,9 @@
+[Event "Demo"]
+[Date "2006.06.30"]
+[White "Raphael"]
+[Black "Hiaves"]
+[Result "0-1"]
+
+1.e4 e5 2.Nf3 Nc6 3.Bb5 Nf6 4.Nc3 Bc5 5.0-0 d5 6.exd5 Nxd5 7.Nxd5 Qxd5 8.Bxc6
+bxc6 9.c3 0-0 10.Ng5 e4 11.d4 exd3(ep) 12.Qf3 d2 13.Qxd5 dxc1=Q 14.Raxc1 cxd5
+15.Kh1 Bb7 16.f4 Rfe8 17.Nh3 Rad8 18.g3 Be3 19.Rcd1 f6 20.Rfe1 d4#

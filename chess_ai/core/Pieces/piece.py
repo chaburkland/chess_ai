@@ -1,6 +1,7 @@
 from abc import abstractclassmethod
 import typing as tp
 from itertools import product
+from enum import Enum
 
 from chess_ai.core.Utils.reference import Ref
 from chess_ai.core.Mechanics.color import Color, get_opposite_color
@@ -12,11 +13,13 @@ from termcolor import colored
 BAR = '-----'
 
 
-class _Empty:
-    def __repr__(self):
-        return '   '
-
-Empty = _Empty()
+class PieceType(Enum):
+    King = 'King'
+    Queen = 'Queen'
+    Knight = 'Knight'
+    Bishop = 'Bishop'
+    Rook = 'Rook'
+    Pawn = 'Pawn'
 
 
 class Piece:
@@ -25,14 +28,35 @@ class Piece:
     _pos: Point
     _is_first_move: bool
 
+    @classmethod
+    def from_piece_type(cls, piece_type: PieceType, color: Color, board: 'Board', pos: Point):
+        if piece_type == PieceType.King:
+            raise RuntimeError('Cannot instantiate King objects from this constructor')
+        elif piece_type == PieceType.Queen:
+            return Queen(color, board, pos)
+        elif piece_type == PieceType.Rook:
+            return Rook(color, board, pos)
+        elif piece_type == PieceType.Bishop:
+            return Bishop(color, board, pos)
+        elif piece_type == PieceType.Knight:
+            return Knight(color, board, pos)
+        elif piece_type == PieceType.Pawn:
+            raise RuntimeError('Cannot instantiate Pawn objects from this constructor')
+        raise ValueError(f'Unknown piece type: {piece_type}')
+
     def __init__(self, color: Color, board: 'Board', pos: Point):
         self.color: Color = color
         self._board: 'Board' = board
         self._pos: Point = pos
         self._is_first_move: bool = True
+        self._valid_moves_cache = None
 
+    @property
     @abstractclassmethod
-    def can_attack(self, pos: Point) -> bool:
+    def piece_type(self) -> PieceType:
+        raise NotImplementedError()
+
+    def can_attack(self, pos: Point, *, ignore_color: bool = False) -> bool:
         raise NotImplementedError()
 
     def try_attack_from(self, try_from: Point, attack_to: Point) -> bool:
@@ -65,9 +89,18 @@ class Piece:
 
         en_passant.update(Point())
 
+    def invalidate_cache(self) -> None:
+        self._valid_moves_cache = None
+
     @abstractclassmethod
-    def get_all_valid_moves(self) -> tp.List[Point]:
+    def _get_all_valid_moves(self) -> tp.List[Point]:
         raise NotImplementedError()
+
+    def get_all_valid_moves(self) -> tp.List[Point]:
+        if self._valid_moves_cache is None:
+            self._valid_moves_cache = self._get_all_valid_moves()
+
+        return self._valid_moves_cache
 
     @property
     def is_first_move(self) -> bool:
@@ -88,7 +121,7 @@ class Piece:
 
         # Keep advancing along empty spaces until end is hit
         while col != to:
-            if self._board[me_x, col] is not Empty:
+            if self._board[me_x, col] is not None:
                 return False
             col += direction
 
@@ -105,7 +138,7 @@ class Piece:
 
         # Keep advancing along empty spaces until end is hit
         while row != to:
-            if self._board[row, me_y] is not Empty:
+            if self._board[row, me_y] is not None:
                 return False
             row += direction
 
@@ -127,21 +160,24 @@ class Piece:
 
         # Keep advancing along empty spaces until end is hit
         while not to.equals(row, col):
-            if self._board[row, col] is not Empty:
+            if self._board[row, col] is not None:
                 return False
             row += x_direction
             col += y_direction
 
         return True
 
-    def _check_illegal_move(self, to: Point) -> bool:
+    def _check_illegal_move(self, to: Point, *, ignore_color: bool = False) -> bool:
         # Cannot move outisde board or to same spot
         if not to.is_valid() or self._pos == to:
             return True
 
+        if ignore_color:
+            return False
+
         # Cannot move to teammate spot
         actual_piece = self._board[to]
-        if actual_piece is not Empty and actual_piece.color == self.color:
+        if actual_piece is not None and actual_piece.color == self.color:
             return True
 
         return False
@@ -149,9 +185,14 @@ class Piece:
     def __repr__(self) -> str:
         return self.color.value[0].lower() + self.__class__.__name__[:2]
 
+
 class Queen(Piece):
-    def can_attack(self, pos: Point) -> bool:
-        if self._check_illegal_move(pos):
+    @property
+    def piece_type(cls) -> PieceType:
+        return PieceType.Queen
+
+    def can_attack(self, pos: Point, *, ignore_color: bool = False) -> bool:
+        if self._check_illegal_move(pos, ignore_color=ignore_color):
             return False
 
         me_x = self.pos.x
@@ -172,7 +213,7 @@ class Queen(Piece):
 
         return False
 
-    def get_all_valid_moves(self) -> tp.List[Point]:
+    def _get_all_valid_moves(self) -> tp.List[Point]:
         moves = []
         for row, col in product(range(8), range(8)):
             move = Point(row, col)
@@ -182,6 +223,10 @@ class Queen(Piece):
 
 
 class King(Piece):
+    @property
+    def piece_type(cls) -> PieceType:
+        return PieceType.King
+
     def __init__(self, color: Color, board: 'Board', pos: Point):
         super().__init__(color, board, pos)
         self.in_check = False
@@ -193,8 +238,8 @@ class King(Piece):
         # Cannot move into check
         return not self._board.is_attackable(pos, get_opposite_color(self.color))
 
-    def can_attack(self, pos: Point) -> bool:
-        if self._check_illegal_move(pos):
+    def can_attack(self, pos: Point, *, ignore_color: bool = False) -> bool:
+        if self._check_illegal_move(pos, ignore_color=ignore_color):
             return False
 
         me_x = self.pos.x
@@ -220,23 +265,23 @@ class King(Piece):
 
         # Castling left
         if (to_y == 2 and
-                self._board[me_x, 0] is not Empty and self._board[me_x, 0].is_first_move and  # Col A rook hasn't moved yet
-                self._board[me_x, 1] is Empty and                                             # Col B in first row is unoccupied
-                self._board[me_x, 2] is Empty and                                             # Col C in first row is unoccupied
-                self._board[me_x, 3] is Empty):                                               # Col D in first row is unoccupied
+                self._board[me_x, 0] is not None and self._board[me_x, 0].is_first_move and  # Col A rook hasn't moved yet
+                self._board[me_x, 1] is None and                                             # Col B in first row is unoccupied
+                self._board[me_x, 2] is None and                                             # Col C in first row is unoccupied
+                self._board[me_x, 3] is None):                                               # Col D in first row is unoccupied
             return True
 
         # Castling right
         if (to_y == 6 and
-                self._board[me_x, 7] is not Empty and self._board[me_x, 7].is_first_move and  # Col H rook hasn't moved yet
-                self._board[me_x, 6] is Empty and                                             # Col G in first row is unoccupied
-                self._board[me_x, 5] is Empty):                                               # Col F in first row is unoccupied
+                self._board[me_x, 7] is not None and self._board[me_x, 7].is_first_move and  # Col H rook hasn't moved yet
+                self._board[me_x, 6] is None and                                             # Col G in first row is unoccupied
+                self._board[me_x, 5] is None):                                               # Col F in first row is unoccupied
             return True
 
         # Any other option is illegal
         return False
 
-    def get_all_valid_moves(self) -> tp.List[Point]:
+    def _get_all_valid_moves(self) -> tp.List[Point]:
         moves = []
 
         x = self.pos.x
@@ -262,9 +307,14 @@ class King(Piece):
 
         return moves
 
+
 class Pawn(Piece):
-    def can_attack(self, pos: Point) -> bool:
-        if self._check_illegal_move(pos):
+    @property
+    def piece_type(cls) -> PieceType:
+        return PieceType.Pawn
+
+    def can_attack(self, pos: Point, *, ignore_color: bool = False) -> bool:
+        if self._check_illegal_move(pos, ignore_color=ignore_color):
             return False
 
         x = pos.x
@@ -285,18 +335,18 @@ class Pawn(Piece):
 
         # Check forward 1 space is vacant
         if abs(v_distance) == 1 and abs(h_distance) == 0:
-            return to_attack is Empty
+            return to_attack is None
 
         # Check forward 2 spaces is vacant if first move
         if self._is_first_move and abs(v_distance) == 2 and abs(h_distance) == 0:
-            return to_attack is Empty
+            return to_attack is None
 
         # Check left/right attack and en passant
         if abs(v_distance) == 1 and abs(h_distance) == 1:
-            if self._board.is_enpassant(pos) and to_attack is Empty:
+            if self._board.is_enpassant(pos) and to_attack is None:
                 return True
 
-            if to_attack is not Empty:
+            if to_attack is not None:
                 return True
 
         return False
@@ -306,21 +356,17 @@ class Pawn(Piece):
         to_x = to.x
         to_y = to.y
 
-        new_en_passant = Point()
-
         # If double-step, any existing en passant was effectively ignored and a new en passant is in effect
+        new_en_passant = Point()
         if abs(piece_x - to_x) == 2:
             direction = -1 if piece_x > to_x else 1
 
             new_en_passant = Point(piece_x + direction, to_y)
-        else:
-            if to == en_passant():
-                self._board.remove_piece((piece_x, to_y))
 
         super().perform_move(to, en_passant)
         en_passant.update(new_en_passant)
 
-    def get_all_valid_moves(self) -> tp.List[Point]:
+    def _get_all_valid_moves(self) -> tp.List[Point]:
         moves = []
         x = self.pos.x
         y = self.pos.y
@@ -338,8 +384,12 @@ class Pawn(Piece):
 
 
 class Rook(Piece):
-    def can_attack(self, pos: Point) -> bool:
-        if self._check_illegal_move(pos):
+    @property
+    def piece_type(cls) -> PieceType:
+        return PieceType.Rook
+
+    def can_attack(self, pos: Point, *, ignore_color: bool = False) -> bool:
+        if self._check_illegal_move(pos, ignore_color=ignore_color):
             return False
 
         me_x = self.pos.x
@@ -357,7 +407,7 @@ class Rook(Piece):
 
         return False
 
-    def get_all_valid_moves(self) -> tp.List[Point]:
+    def _get_all_valid_moves(self) -> tp.List[Point]:
         moves = []
 
         x = self.pos.x
@@ -376,8 +426,12 @@ class Rook(Piece):
 
 
 class Knight(Piece):
-    def can_attack(self, pos: Point) -> bool:
-        if self._check_illegal_move(pos):
+    @property
+    def piece_type(cls) -> PieceType:
+        return PieceType.Knight
+
+    def can_attack(self, pos: Point, *, ignore_color: bool = False) -> bool:
+        if self._check_illegal_move(pos, ignore_color=ignore_color):
             return False
 
         v_distance = abs(self.pos.x - pos.x)
@@ -386,7 +440,7 @@ class Knight(Piece):
         return ((v_distance == 1 and h_distance == 2) or
                 (v_distance == 2 and h_distance == 1))
 
-    def get_all_valid_moves(self) -> tp.List[Point]:
+    def _get_all_valid_moves(self) -> tp.List[Point]:
         moves = []
         x = self.pos.x
         y = self.pos.y
@@ -407,8 +461,12 @@ class Knight(Piece):
 
 
 class Bishop(Piece):
-    def can_attack(self, pos: Point) -> bool:
-        if self._check_illegal_move(pos):
+    @property
+    def piece_type(cls) -> PieceType:
+        return PieceType.Bishop
+
+    def can_attack(self, pos: Point, *, ignore_color: bool = False) -> bool:
+        if self._check_illegal_move(pos, ignore_color=ignore_color):
             return False
 
         v_distance = self.pos.x - pos.x
@@ -419,7 +477,7 @@ class Bishop(Piece):
 
         return False
 
-    def get_all_valid_moves(self) -> tp.List[Point]:
+    def _get_all_valid_moves(self) -> tp.List[Point]:
         moves = []
         for row, col in product(range(8), range(8)):
             move = Point(row, col)
